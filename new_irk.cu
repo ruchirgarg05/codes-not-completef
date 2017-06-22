@@ -86,7 +86,6 @@ void gpu_blas_mmul(const double *A, const double*B, double *C, const int m, cons
 
   // Do the actual multiplication
   cublasDgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
-
   // Destroy the handle
   cublasDestroy(handle);
 }
@@ -138,14 +137,14 @@ int nr_rows_A, nr_cols_A, nr_rows_B, nr_cols_B, nr_rows_C, nr_cols_C;
 double *h_C=(double*)malloc(n*sizeof(*h_C));
 nr_rows_A=n;nr_cols_A=n;nr_rows_B=n;nr_cols_B=1;nr_rows_C=n;nr_cols_C=1;
 
-double *d_A;cudaMalloc(&d_A,nr_rows_A * nr_cols_A * sizeof(*d_A));
+double *d_A1;cudaMalloc(&d_A1,nr_rows_A * nr_cols_A * sizeof(*d_A1));
 double *d_B;cudaMalloc(&d_B,nr_rows_B * nr_cols_B * sizeof(*d_B));
 double *d_C;cudaMalloc(&d_C,nr_rows_C * nr_cols_C * sizeof(*d_C));
-//int d_A_ColIndices ;cudaMalloc(&d_A_ColIndices, nnzA * sizeof(*d_A_ColIndices));
-cudaMemcpy(d_A,h_A1_dense,nr_rows_A * nr_cols_A * sizeof(double),cudaMemcpyHostToDevice);
+//int d_A1_ColIndices ;cudaMalloc(&d_A1_ColIndices, nnzA * sizeof(*d_A1_ColIndices));
+cudaMemcpy(d_A1,h_A1_dense,nr_rows_A * nr_cols_A * sizeof(double),cudaMemcpyHostToDevice);
 cudaMemcpy(d_B,B,nr_rows_B * nr_cols_B * sizeof(double),cudaMemcpyHostToDevice);
 
-gpu_blas_mmul(d_A, d_B, d_C, nr_rows_A, nr_cols_A, nr_cols_B);
+gpu_blas_mmul(d_A1, d_B, d_C, nr_rows_A, nr_cols_A, nr_cols_B);
 cudaMemcpy(h_C,d_C,nr_rows_C * nr_cols_C * sizeof(double),cudaMemcpyDeviceToHost);
 for(int i=0;i<n;i++){r[i]=B[i]-h_C[i];r_temp_tilde[i]=r[i];r0[i]=r[i];r0_tilde[i]=r[i];    normr+=r[i]*r[i];normb+=B[i]*B[i];}
 normr=sqrt(normr);normb=sqrt(normb);
@@ -193,8 +192,17 @@ cusolverDnDormqr(solver_handle, CUBLAS_SIDE_LEFT,CUBLAS_OP_N,nr_rows_A,nr_cols_A
 
 
   double *d_r; cudaMalloc(&d_r, nr_rows_A*nr_cols_A*sizeof(double));
+
+   double *d_p; cudaMalloc(&d_p, n*sizeof(double ));
+
+   double *d_A1_trans;cudaMalloc(&d_A1_trans, n*n*sizeof(double ));
+  double *d_R ; cudaMalloc(&d_R,nr_cols_A*nr_cols_A*sizeof(double));
+  double  *h_Bl= (double *)malloc(nr_cols_A*nr_cols_A*sizeof(double));
+  double  *d_Bl; cudaMalloc(&d_Bl,nr_cols_A*nr_cols_A*sizeof(double));
+double *d_qq; cudaMalloc(&d_qq, n*sizeof(double ));
+
 for(int i=0;i<rmaxit; i++){
-  // solve Mz=r;
+  // solve Mz=r;//block solve
   for(int j=0;j<n;j++){r[j]=r0[j];r_temp_tilde[j]=r0_tilde[j];}
   cudaMemcpy(d_r,r,nr_rows_A*nr_cols_A*sizeof(double),cudaMemcpyHostToDevice);
   cusolverDnDormqr(solver_handle,CUBLAS_SIDE_LEFT,CUBLAS_OP_T,nr_rows_A,nr_cols_A,min(nr_cols_A,nr_rows_A),
@@ -205,9 +213,6 @@ for(int i=0;i<rmaxit; i++){
   // only the first coloumn if d_r makes sense ...
   
   cudaMemcpy(r,d_r,nr_rows_A*nr_cols_A*sizeof(double ), cudaMemcpyDeviceToHost);
-  double *d_R ; cudaMalloc(&d_R,nr_cols_A*nr_cols_A*sizeof(double));
-  double  *h_Bl= (double *)malloc(nr_cols_A*nr_cols_A*sizeof(double));
-  double  *d_Bl; cudaMalloc(&d_Bl,nr_cols_A*nr_cols_A*sizeof(double));
   dim3 Grid(iDivUp(nr_cols_A,BLOCK_SIZE),iDivUp(nr_cols_A,BLOCK_SIZE));
   dim3 Block(BLOCK_SIZE,BLOCK_SIZE);
   copy_kernel<<<Grid, Block>>>(d_M,d_R,d_r,d_Bl,nr_rows_A,nr_cols_A);
@@ -245,19 +250,17 @@ for(int i=0;i<rmaxit; i++){
 
     // q=Ap and q_tilde =At*p
    
-   double *d_p; cudaMalloc(&d_p, n*sizeof(double ));
    cudaMemcpy(d_p, p, n* sizeof(double),cudaMemcpyHostToDevice );
 
-   double *d_qq; cudaMalloc(&d_qq, n*sizeof(double ));
    
-   gpu_blas_mmul(d_A, d_p, d_qq, nr_rows_A, nr_cols_A, nr_cols_B);
+   
+   gpu_blas_mmul(d_A1, d_p, d_qq, nr_rows_A, nr_cols_A, nr_cols_B);
 
    cudaMemcpy(q, d_qq, n* sizeof(double),cudaMemcpyDeviceToHost ); 
-   double *d_A_trans;cudaMalloc(&d_A_trans, n*n*sizeof(double ));
-   cudaMemcpy(d_A_trans,h_A_trans,n*n*sizeof(double),cudaMemcpyHostToDevice);
+   cudaMemcpy(d_A1_trans,h_A_trans,n*n*sizeof(double),cudaMemcpyHostToDevice);
    cudaMemcpy(d_p, p_tilde, n* sizeof(double),cudaMemcpyHostToDevice );
 
-   gpu_blas_mmul(d_A_trans, d_p, d_qq, nr_rows_A, nr_cols_A, nr_cols_B);
+   gpu_blas_mmul(d_A1_trans, d_p, d_qq, nr_rows_A, nr_cols_A, nr_cols_B);
    cudaMemcpy(q_tilde, d_qq, n* sizeof(double),cudaMemcpyDeviceToHost );
 
    tempp=0;
@@ -287,12 +290,44 @@ for(int i=0;i<rmaxit; i++){
   
 }
 tol =resid;
+
+cudaFree(d_A1);
+cudaFree(d_B);
+cudaFree(d_C);
+cudaFree(d_M);
+
+cudaFree(d_Q);
+cudaFree(d_qq);
+cudaFree(d_TAU);
+cudaFree(dev_info);
+
+cudaFree(d_r);
+cudaFree(d_R);
+cudaFree(work);
+cudaFree(d_Bl);
+
+
+cudaFree(d_A1_trans);
+free(r0);
+free(r0_tilde);
+free(r_temp_tilde);
+free(r);
+free(z);
+free(z_tilde);
+free(q_tilde);
+free(q);
+free(p);
+free(p_tilde);
+free(h_A_trans);
+free(h_Q);
+free(h_C);
+free(h_Bl);
+cublasDestroy(Blas_handle);
+cusolverDnDestroy(solver_handle);
+
+
+
 return 1;
-
-
-
-
-
 
 
 
@@ -300,18 +335,17 @@ return 1;
 
 }
 
-
 int main(){
-int n,r;
-n=10;
-r=2;
+const int n=10;const int r=4;
+const int N=n;
+
 int rmaxit,max_iter,irka_iter;
 double rtol,itol;
 
 double *x0 = (double*)malloc(n*sizeof(double));    
 cout<<"I am Here"<<endl;;
 double *x0_tilde= (double*)malloc(n*sizeof(*x0_tilde));  
-double *A=(double*)malloc(n*n*sizeof(*A));
+double *A=(double*)malloc(n*n*sizeof(double));
 double *B=(double*)malloc(n*sizeof(*B));
 double *C=(double*)malloc(n*sizeof(*C)); 
 double *res=(double*)malloc(n*sizeof(*res));
@@ -337,32 +371,44 @@ for(int i=0;i<n;i++){
   for(int j=0;j<n;j++){
     if(i==j)eye_n[i*n+j]=1;
     else eye_n[i*n+j]=0;
-    A[i*n+j]=((rand()%10));
+    double tempx=rand()%10;
+    if(tempx>7 or tempx< 3){A[i*n+j]=(rand()%10);}
+    else A[i*n+j]=0;
   }
 }
 //for(int i=0;i<n;i++){for(int j=0;j<n;j++){cout<<eye_n[i*n+j]<<" ";}cout<<endl;}
 //initialize sparse matrix A
-cusparseHandle_t handle;
-double *d_A_dense ; cudaMalloc(&d_A_dense ,n*n*sizeof(double));
+cusparseHandle_t handle; cusparseCreate(&handle);
+
+double *d_A_dense;  cudaMalloc(&d_A_dense, n * n * sizeof(double));
 double *d_EYE_dense ; cudaMalloc(&d_EYE_dense ,n*n*sizeof(double));
 
-cudaMemcpy(d_A_dense, A , n*n*sizeof(double),cudaMemcpyHostToDevice);
+cudaMemcpy(d_A_dense, A, n * n * sizeof(double), cudaMemcpyHostToDevice);
+//cudaMemcpy(d_A_dense, A , n*n*sizeof(double),cudaMemcpyHostToDevice);
 cudaMemcpy(d_EYE_dense, eye_n , n*n*sizeof(double),cudaMemcpyHostToDevice);
 
-cusparseMatDescr_t descrA; cusparseCreateMatDescr(&descrA);
+cusparseMatDescr_t descrA;    cusparseCreateMatDescr(&descrA);
 cusparseSetMatType    (descrA, CUSPARSE_MATRIX_TYPE_GENERAL);
-cusparseSetMatIndexBase(descrA, CUSPARSE_INDEX_BASE_ZERO);
+cusparseSetMatIndexBase(descrA, CUSPARSE_INDEX_BASE_ONE);  
+
+
 
 cusparseMatDescr_t descrEYE; cusparseCreateMatDescr(&descrEYE);
 cusparseSetMatType    (descrEYE, CUSPARSE_MATRIX_TYPE_GENERAL);
 cusparseSetMatIndexBase(descrEYE, CUSPARSE_INDEX_BASE_ZERO);
+int nnzA = 0;             // --- Number of nonzero elements in dense matrix A
 
-int nnzA=0;
+const int lda = N;
 int nnzEYE=0;
+  int *d_nnzPerVectorA;   cudaMalloc(&d_nnzPerVectorA, n * sizeof(*d_nnzPerVectorA));
+  cusparseDnnz(handle, CUSPARSE_DIRECTION_ROW, n, n, descrA, d_A_dense, lda, d_nnzPerVectorA, &nnzA);
 
-const int lda=n;
-int *d_nnzPerVectorA; cudaMalloc(&d_nnzPerVectorA,n*sizeof(*d_nnzPerVectorA));
-cusparseDnnz(handle,CUSPARSE_DIRECTION_ROW,n,n,descrA,d_A_dense,lda,d_nnzPerVectorA, &nnzA);
+
+
+cout<<"nnzA is equal to "<<nnzA<<endl;
+//int *d_nnzPerVectorA; cudaMalloc(&d_nnzPerVectorA,n*sizeof(*d_nnzPerVectorA));
+//cusparseDnnz(handle,CUSPARSE_DIRECTION_ROW,n,n,descrA,d_A_dense,lda,d_nnzPerVectorA, &nnzA);
+
 
 int *d_nnzPerVectorEYE; cudaMalloc(&d_nnzPerVectorEYE,n*sizeof(*d_nnzPerVectorEYE));
 cusparseDnnz(handle,CUSPARSE_DIRECTION_ROW,n,n,descrEYE,d_EYE_dense,lda,d_nnzPerVectorEYE, &nnzEYE);
@@ -389,7 +435,6 @@ cusparseDdense2csr(handle, n, n, descrEYE, d_EYE_dense, lda, d_nnzPerVectorEYE, 
 
 
 
-cout<<"recahef"<<nnzA<<" "<<nnzEYE<<endl;
 // --- Host side sparse matrices
 double *h_A = (double *)malloc(nnzA * sizeof(*h_A));
 
@@ -436,8 +481,10 @@ double *h_A1_dense = (double*)malloc(n * n * sizeof(*h_A1_dense));
 double *h_A1 = (double *)malloc(nnzA1 * sizeof(*h_A1));   
 int *h_A1_ColIndices = (int *)malloc(nnzA1 * sizeof(*h_A1_ColIndices));
 
+cudaFree(d_nnzPerVectorA);
+cudaFree(d_nnzPerVectorEYE);
+//while loop
 
-//
 while(error>itol and irka_iter<max_iter){
  irka_iter++; 
  for(int i=0;i<n;i++)sig_old[i]=sig[i];
@@ -459,8 +506,8 @@ while(error>itol and irka_iter<max_iter){
 
     int *d_A1_ColIndices; cudaMalloc(&d_A1_ColIndices, nnzA1 * sizeof(int));
     
-double *d_A1;         cudaMalloc(&d_A1, nnzA1 * sizeof(double));
-
+    double *d_A1;         cudaMalloc(&d_A1, nnzA1 * sizeof(double));
+   
        double alpha; double beta;
        alpha=sig[i];beta=-1;
 
@@ -478,6 +525,9 @@ double *d_A1;         cudaMalloc(&d_A1, nnzA1 * sizeof(double));
        cudaMemcpy(h_A1_RowIndices, d_A1_RowIndices, (n + 1) * sizeof(*h_A1_RowIndices), cudaMemcpyDeviceToHost);
        cudaMemcpy(h_A1_ColIndices, d_A1_ColIndices, nnzA1 * sizeof(*h_A1_ColIndices), cudaMemcpyDeviceToHost);
        cudaMemcpy(h_A1_dense, d_A1_dense, n * n * sizeof(double), cudaMemcpyDeviceToHost);
+        cudaFree(d_A1);
+       cudaFree(d_A1_ColIndices);
+  
         // iintitialise x0 and x0_tilde
         for(int j =0;j<n;j++){
           x0[j]=((rand()+2)%7)/10;x0_tilde[j]=((rand()+7)%10)/10;
@@ -598,8 +648,70 @@ double *d_A1;         cudaMalloc(&d_A1, nnzA1 * sizeof(double));
    for(int j=0;j<r;j++){norm_sigma+=sig[j]*sig[j];sig[j]=eigv[j];error+=(sig[j]-sig_old[j])*(sig[j]-sig_old[j]);}
     error/=norm_sigma;
 
+ 
+  cudaFree(d_V);
+  cudaFree(d_W);
+  
+  cudaFree(d_TAU_V);
+  cudaFree(d_TAU_W);
+  
+  cudaFree(work_V_m);
+  cudaFree(work_W_m);
+
+
+  cudaFree(d_Q_V);
+  cudaFree(d_Q_W);
+  
+  cudaFree(d_Q_V_mod);
+  cudaFree(d_Q_W_mod);
+
+  cudaFree(d_A_temp);
+  cudaFree(d_A_red);
+  
+  cudaFree(d_B);
+  cudaFree(d_B_red);
+
+  cudaFree(d_C);
+  cudaFree(d_C_red);
+  
+  cudaFree(dev_info_eig);
+  cudaFree(d_eigv);
+
+  cudaFree(d_eigvec);
+  cudaFree(d_work_eig);
+
+  free(h_Q_V);
+  free(h_Q_W);
+  free(B_red);
+  free(A_red);
+  free(C_red);
+  free(eigv);
+  free(eigvec);
+  cusolverDnDestroy(solver_handle_m);
+  cublasDestroy(cublas_handle_m);
+  
+  
 
  }
 
+
+//goes betwwn these two comments.
+cusparseDestroyMatDescr(descrEYE);
+cusparseDestroyMatDescr(descrA);
+cusparseDestroy(handle);
+cudaFree(d_A1_dense);
+cudaFree(d_A1_RowIndices);
+cudaFree(d_EYE);
+cudaFree(d_EYE_ColIndices);
+cudaFree(d_EYE_RowIndices);
+cudaFree(d_A);
+cudaFree(d_A_RowIndices);
+cudaFree(d_A_ColIndices);
+cudaFree(d_A_dense);
+cudaFree(d_nnzPerVectorA);
+cudaFree(d_nnzPerVectorEYE);
+
+
 }
+
 
