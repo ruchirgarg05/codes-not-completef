@@ -1,3 +1,4 @@
+//to run  - nvcc new_irk.cu  -lcublas -lcurand -lcusparse  -lcusolver -lcudart  -o  rg7
 
 #include <typeinfo> // for usage of C++ typeid
 #include <stdio.h>
@@ -137,14 +138,14 @@ int nr_rows_A, nr_cols_A, nr_rows_B, nr_cols_B, nr_rows_C, nr_cols_C;
 double *h_C=(double*)malloc(n*sizeof(*h_C));
 nr_rows_A=n;nr_cols_A=n;nr_rows_B=n;nr_cols_B=1;nr_rows_C=n;nr_cols_C=1;
 
-double *d_A1;cudaMalloc(&d_A1,nr_rows_A * nr_cols_A * sizeof(*d_A1));
+double *d_rA1;cudaMalloc(&d_rA1,nr_rows_A * nr_cols_A * sizeof(*d_rA1));
 double *d_B;cudaMalloc(&d_B,nr_rows_B * nr_cols_B * sizeof(*d_B));
 double *d_C;cudaMalloc(&d_C,nr_rows_C * nr_cols_C * sizeof(*d_C));
-//int d_A1_ColIndices ;cudaMalloc(&d_A1_ColIndices, nnzA * sizeof(*d_A1_ColIndices));
-cudaMemcpy(d_A1,h_A1_dense,nr_rows_A * nr_cols_A * sizeof(double),cudaMemcpyHostToDevice);
+//int d_rA1_ColIndices ;cudaMalloc(&d_rA1_ColIndices, nnzA * sizeof(*d_rA1_ColIndices));
+cudaMemcpy(d_rA1,h_A1_dense,nr_rows_A * nr_cols_A * sizeof(double),cudaMemcpyHostToDevice);
 cudaMemcpy(d_B,B,nr_rows_B * nr_cols_B * sizeof(double),cudaMemcpyHostToDevice);
 
-gpu_blas_mmul(d_A1, d_B, d_C, nr_rows_A, nr_cols_A, nr_cols_B);
+gpu_blas_mmul(d_rA1, d_B, d_C, nr_rows_A, nr_cols_A, nr_cols_B);
 cudaMemcpy(h_C,d_C,nr_rows_C * nr_cols_C * sizeof(double),cudaMemcpyDeviceToHost);
 for(int i=0;i<n;i++){r[i]=B[i]-h_C[i];r_temp_tilde[i]=r[i];r0[i]=r[i];r0_tilde[i]=r[i];    normr+=r[i]*r[i];normb+=B[i]*B[i];}
 normr=sqrt(normr);normb=sqrt(normb);
@@ -195,7 +196,7 @@ cusolverDnDormqr(solver_handle, CUBLAS_SIDE_LEFT,CUBLAS_OP_N,nr_rows_A,nr_cols_A
 
    double *d_p; cudaMalloc(&d_p, n*sizeof(double ));
 
-   double *d_A1_trans;cudaMalloc(&d_A1_trans, n*n*sizeof(double ));
+   double *d_rA1_trans;cudaMalloc(&d_rA1_trans, n*n*sizeof(double ));
   double *d_R ; cudaMalloc(&d_R,nr_cols_A*nr_cols_A*sizeof(double));
   double  *h_Bl= (double *)malloc(nr_cols_A*nr_cols_A*sizeof(double));
   double  *d_Bl; cudaMalloc(&d_Bl,nr_cols_A*nr_cols_A*sizeof(double));
@@ -203,6 +204,8 @@ double *d_qq; cudaMalloc(&d_qq, n*sizeof(double ));
 
 for(int i=0;i<rmaxit; i++){
   // solve Mz=r;//block solve
+ // if(i==5 or i==6)cout<<i<<" "<<resid<<" "<<normr<< endl;
+// if(i==1){ for(int j=0;j<n;j++){cout<<r0[j]<<" ";}cout<<endl;for(int j=0;j<n;j++){cout<<r0_tilde[j]<<" ";} }
   for(int j=0;j<n;j++){r[j]=r0[j];r_temp_tilde[j]=r0_tilde[j];}
   cudaMemcpy(d_r,r,nr_rows_A*nr_cols_A*sizeof(double),cudaMemcpyHostToDevice);
   cusolverDnDormqr(solver_handle,CUBLAS_SIDE_LEFT,CUBLAS_OP_T,nr_rows_A,nr_cols_A,min(nr_cols_A,nr_rows_A),
@@ -224,9 +227,14 @@ for(int i=0;i<rmaxit; i++){
    cublasDtrsm(Blas_handle,CUBLAS_SIDE_LEFT,CUBLAS_FILL_MODE_UPPER,CUBLAS_OP_N,CUBLAS_DIAG_NON_UNIT,nr_cols_A,nr_cols_A,
                 &alpha,d_R,nr_cols_A,d_Bl,nr_cols_A);
    cudaMemcpy(h_Bl,d_Bl,nr_cols_A*nr_cols_A*sizeof(double), cudaMemcpyDeviceToHost);
-    for(int j =0;j<n;j++ )z[j]=h_Bl[j];
+    for(int j =0;j<n;j++ ){z[j]=h_Bl[j];if(i==3)cout<<z[j]<<" ";}
+
+
+
+
       // solve Mtz=r_temp_tilde 
-    for(int j =0;j<n;j++)z_tilde[j]=z[j];
+    for(int j =0;j<n;j++)z_tilde[j]=-1*z[j]/1.67;
+
     rho1=0;
     for(int j=0;j<n;j++ )rho1+=z[j]*r0_tilde[j];
     if(rho1==0){
@@ -236,15 +244,24 @@ for(int i=0;i<rmaxit; i++){
     }  
 
     if(i==0){
+      
+
       for(int j=0;j<n;j++){
         p[j]=z[j];p_tilde[j]=z_tilde[j];
       }
     }
     else{
      betta=rho1/rho2;
+
+
+   
+    //if(i==1){cout<<"A is \n"; for(int j=0;j<n;j++){ for(int k=0;k<n;k++) cout<<h_A1_dense[j*n+k]<<" ";  }cout<<endl;          }
+    //if(i==1){ cout<<"p is  \n" ;for(int j=0;j<n;j++)cout<<p[j]<<" "; }
+
      for(int j=0;j<n;j++) {
       p[j]=betta*p[j]+z[j];
       p_tilde[j]=betta*p_tilde[j]+z_tilde[j];
+     //if(i==1)cout<<" p[ "<<j<<" ] ="<<p_tilde[j]<<endl;
 
      }
 
@@ -254,22 +271,25 @@ for(int i=0;i<rmaxit; i++){
 
    
    
-   gpu_blas_mmul(d_A1, d_p, d_qq, nr_rows_A, nr_cols_A, nr_cols_B);
+   gpu_blas_mmul(d_rA1, d_p, d_qq, nr_rows_A, nr_cols_A, nr_cols_B);
 
-   cudaMemcpy(q, d_qq, n* sizeof(double),cudaMemcpyDeviceToHost ); 
-   cudaMemcpy(d_A1_trans,h_A_trans,n*n*sizeof(double),cudaMemcpyHostToDevice);
+   
+
+   cudaMemcpy(q, d_qq, n* sizeof(double),cudaMemcpyDeviceToHost ); if(i==0)for(int j=0;i<n;j++){cout<<q[j]<<" ";}
+   cudaMemcpy(d_rA1_trans,h_A_trans,n*n*sizeof(double),cudaMemcpyHostToDevice);
    cudaMemcpy(d_p, p_tilde, n* sizeof(double),cudaMemcpyHostToDevice );
 
-   gpu_blas_mmul(d_A1_trans, d_p, d_qq, nr_rows_A, nr_cols_A, nr_cols_B);
+   gpu_blas_mmul(d_rA1_trans, d_p, d_qq, nr_rows_A, nr_cols_A, nr_cols_B);
    cudaMemcpy(q_tilde, d_qq, n* sizeof(double),cudaMemcpyDeviceToHost );
 
    tempp=0;
+    for(int j=0;j<n;j++){}
    for(int j=0;j<n;j++)tempp+=p_tilde[j]*q[j];
    double alphaa = -1*rho1/tempp;
    for(int j=0;j<n;j++){
-       x0[j]+=alphaa*p[j];
-       r0[j]-=alphaa*q[j];
-       r0_tilde[j]-=alphaa*q_tilde[j];
+      // x0[j]+=alphaa*p[j];
+      // r0[j]+=alphaa*q[j];
+      // r0_tilde[j]=alphaa*q_tilde[j];
       
       }
       rho2=rho1;
@@ -291,7 +311,7 @@ for(int i=0;i<rmaxit; i++){
 }
 tol =resid;
 
-cudaFree(d_A1);
+cudaFree(d_rA1);
 cudaFree(d_B);
 cudaFree(d_C);
 cudaFree(d_M);
@@ -307,7 +327,7 @@ cudaFree(work);
 cudaFree(d_Bl);
 
 
-cudaFree(d_A1_trans);
+cudaFree(d_rA1_trans);
 free(r0);
 free(r0_tilde);
 free(r_temp_tilde);
@@ -336,14 +356,14 @@ return 1;
 }
 
 int main(){
-const int n=10;const int r=4;
+const int n=4;const int r=2;
 const int N=n;
 
 int rmaxit,max_iter,irka_iter;
 double rtol,itol;
 
 double *x0 = (double*)malloc(n*sizeof(double));    
-cout<<"I am Here"<<endl;;
+
 double *x0_tilde= (double*)malloc(n*sizeof(*x0_tilde));  
 double *A=(double*)malloc(n*n*sizeof(double));
 double *B=(double*)malloc(n*sizeof(*B));
@@ -358,6 +378,9 @@ double *eye_n=(double*)malloc(n*n*sizeof(*eye_n));
 double *V =(double *)malloc (n*n*sizeof(double));
 double *W =(double *)malloc (n*n*sizeof(double));
 
+  double *B_red=(double *)malloc(r*sizeof(double));
+  double *C_red=(double *)malloc(r*sizeof(double));
+  double *A_red=(double *)malloc(r*r*sizeof(double));
 
 double error=100007;
 max_iter=100;
@@ -376,6 +399,7 @@ for(int i=0;i<n;i++){
     else A[i*n+j]=0;
   }
 }
+
 //for(int i=0;i<n;i++){for(int j=0;j<n;j++){cout<<eye_n[i*n+j]<<" ";}cout<<endl;}
 //initialize sparse matrix A
 cusparseHandle_t handle; cusparseCreate(&handle);
@@ -455,7 +479,7 @@ cudaMemcpy(h_EYE_RowIndices, d_EYE_RowIndices, (n + 1) * sizeof(*h_EYE_RowIndice
 cudaMemcpy(h_EYE_ColIndices, d_EYE_ColIndices, nnzEYE * sizeof(*h_EYE_ColIndices), cudaMemcpyDeviceToHost);
 
 
-irka_iter=1;
+irka_iter=0;
 //initialize sigma ...
 double inii=0.5;double fini=7; 
 for(int i=0;i<r;i++){
@@ -478,17 +502,19 @@ int *d_A1_RowIndices;  cudaMalloc(&d_A1_RowIndices, (n + 1) * sizeof(*d_A1_RowIn
 
 double *h_A1_dense = (double*)malloc(n * n * sizeof(*h_A1_dense));
 
-double *h_A1 = (double *)malloc(nnzA1 * sizeof(*h_A1));   
-int *h_A1_ColIndices = (int *)malloc(nnzA1 * sizeof(*h_A1_ColIndices));
-
-cudaFree(d_nnzPerVectorA);
-cudaFree(d_nnzPerVectorEYE);
+double *h_A1 = (double *)malloc(nnzA1 * sizeof(*h_A1)); 
 //while loop
+cout<<"I am Here"<<endl;;
 
 while(error>itol and irka_iter<max_iter){
  irka_iter++; 
+cout<<"iteration number"<<irka_iter<<endl;
+
  for(int i=0;i<n;i++)sig_old[i]=sig[i];
+
+
  for (int i=0;i<r;i++){
+         
         cusparseXcsrgeamNnz(handle, n, n, 
                             descrEYE, nnzEYE, d_EYE_RowIndices, d_EYE_ColIndices, 
                             descrA, nnzA, d_A_RowIndices, d_A_ColIndices,
@@ -506,11 +532,15 @@ while(error>itol and irka_iter<max_iter){
 
     int *d_A1_ColIndices; cudaMalloc(&d_A1_ColIndices, nnzA1 * sizeof(int));
     
+ int *h_A1_ColIndices = (int *)malloc(nnzA1 * sizeof(*h_A1_ColIndices));
+
+    
     double *d_A1;         cudaMalloc(&d_A1, nnzA1 * sizeof(double));
    
        double alpha; double beta;
        alpha=sig[i];beta=-1;
-
+        
+        cout<<"WTF 0"<<endl;
        //////////////////////////////// maybe 
         cusparseDcsrgeam
                    (handle, n, n,
@@ -521,28 +551,48 @@ while(error>itol and irka_iter<max_iter){
                     descrA1, d_A1, d_A1_RowIndices, d_A1_ColIndices);
        
        cusparseDcsr2dense(handle, n, n, descrA1, d_A1, d_A1_RowIndices, d_A1_ColIndices, d_A1_dense, n);
-       cudaMemcpy(h_A1 ,           d_A1,            nnzA1 * sizeof(*h_A1), cudaMemcpyDeviceToHost);
-       cudaMemcpy(h_A1_RowIndices, d_A1_RowIndices, (n + 1) * sizeof(*h_A1_RowIndices), cudaMemcpyDeviceToHost);
-       cudaMemcpy(h_A1_ColIndices, d_A1_ColIndices, nnzA1 * sizeof(*h_A1_ColIndices), cudaMemcpyDeviceToHost);
+       cout<<"WTF 1"<<endl;
+       
+       //cudaMemcpy(h_A1 ,           d_A1,            nnzA1 * sizeof(double ), cudaMemcpyDeviceToHost);
+       //cudaMemcpy(h_A1_RowIndices, d_A1_RowIndices, (n + 1) * sizeof(*h_A1_RowIndices), cudaMemcpyDeviceToHost);
+       //cudaMemcpy(h_A1_ColIndices, d_A1_ColIndices, nnzA1 * sizeof(*h_A1_ColIndices), cudaMemcpyDeviceToHost);
        cudaMemcpy(h_A1_dense, d_A1_dense, n * n * sizeof(double), cudaMemcpyDeviceToHost);
-        cudaFree(d_A1);
-       cudaFree(d_A1_ColIndices);
-  
+       //*/
+       
+       cout<<"WTF 2"<<endl;
         // iintitialise x0 and x0_tilde
         for(int j =0;j<n;j++){
           x0[j]=((rand()+2)%7)/10;x0_tilde[j]=((rand()+7)%10)/10;
         } 
         int status1= bicg(h_A1_dense,x0,B,eye_n,rmaxit,rtol,n);
         int status2= bicg(h_A1_dense,x0_tilde,C,eye_n,rmaxit,rtol,n);
+
         for(int j=0;j<n;j++){V[j*n+i]=x0[j];W[n*j+i]=x0_tilde[j];}
 
-
+      cout<<"WTF 3"<<endl;
+       cudaFree(d_A1);
+       cudaFree(d_A1_ColIndices);
  
   }
+  for(int i=0;i<n;i++){
+   for(int j=0;j<r;j++){
+    //cout<<V[i*n+j]<<" ";
+  }
+  //cout<<endl;
+}
+   
+  for(int i=0;i<n;i++){
+   for(int j=0;j<r;j++){
+    //cout<<W[i*n+j]<<" ";
+  }
+  //cout<<endl;
+}
+
+
   // We have V and W matrix .... We need to orthogonalise them ....
   cusolverDnHandle_t solver_handle_m;
   cusolverDnCreate (&solver_handle_m);
-
+ 
   cublasHandle_t cublas_handle_m;
   cublasCreate(&cublas_handle_m);
   int work_size_m=0;
@@ -551,39 +601,46 @@ while(error>itol and irka_iter<max_iter){
   const int Ncols=r;
   double *d_V; cudaMalloc(&d_V,Nrows*Ncols*sizeof(double));
   double *d_W; cudaMalloc(&d_W,Nrows*Ncols*sizeof(double));
+ 
+ cout<<"Wtf 3-1"<<endl;;
   cudaMemcpy(d_V,V,Nrows*Ncols*sizeof(double), cudaMemcpyHostToDevice);
   cudaMemcpy(d_W,W,Nrows*Ncols*sizeof(double), cudaMemcpyHostToDevice);
+ 
   //Cuda Qr initialisation,
   double *d_TAU_V ; cudaMalloc(&d_TAU_V,min(Nrows,Ncols)*sizeof(double));
   double *d_TAU_W ; cudaMalloc(&d_TAU_W,min(Nrows,Ncols)*sizeof(double));
 
+cout<<"Wtf 3-2"<<endl;;
   cusolverDnDgeqrf_bufferSize(solver_handle_m, Nrows,Ncols, d_V ,n ,&work_size_m);
-
+cout<<"Wtf 3-3"<<endl;;
   double *work_V_m ; cudaMalloc(&work_V_m, work_size_m*sizeof(double ));
   double *work_W_m ; cudaMalloc(&work_W_m, work_size_m*sizeof(double ));
   // Cuda GERF exec...
 // cusolverDnDgeqrf_bufferSize(        cusolverH,        m,        n,        d_A,       lda,        &lwork_geqrf);
 //cusolver_status = cusolverDnDgeqrf( cusolverH, m, n, d_A, lda, d_tau, d_work, lwork, devInfo);
 
-
+cout<<"Wtf 3-4"<<endl;;
   cusolverDnDgeqrf(solver_handle_m,Nrows,Ncols,d_V,n,d_TAU_V,work_V_m,work_size_m,devInfo_m);
   int devInfo_V_h=0; cudaMemcpy(&devInfo_V_h,devInfo_m,sizeof(int),cudaMemcpyDeviceToHost);
-
+cout<<"Wtf 3-5"<<endl;;
   cusolverDnDgeqrf(solver_handle_m, Nrows , Ncols, d_W,n, d_TAU_W, work_W_m , work_size_m,devInfo_m);
   int devInfo_W_h=0; cudaMemcpy(&devInfo_W_h,devInfo_m,sizeof(int),cudaMemcpyDeviceToHost);
   
   if(devInfo_W_h!=0 or devInfo_V_h!=0){cout<<"Unsuccesful";}
   // At his point the upper triangular part of A contains the elemrnts of R.
-  
+cout<<"Wtf 3-6"<<endl;;  
 
   // Initialising Q matrix.
   double *h_Q_V= (double *)malloc(Nrows*Nrows*sizeof(double));
   double *h_Q_W= (double *)malloc(Nrows*Nrows*sizeof(double));
   for(int j=0;j<Nrows;j++)for(int i=0;i<Nrows;i++){if(j==i){h_Q_V[j+i*Nrows]=1;h_Q_W[j+i*Nrows]=1;}
-                                                   else {h_Q_V[j+i*Nrows]=0;h_Q_W[j+i*Nrows]=0;}  }
+     
+                                              else {h_Q_V[j+i*Nrows]=0;h_Q_W[j+i*Nrows]=0;}  }
+  cout<<"wtf 3-7"<<endl;
   double *d_Q_V;cudaMalloc(&d_Q_V,Nrows*Nrows*sizeof(double));
   double *d_Q_W;cudaMalloc(&d_Q_W,Nrows*Nrows*sizeof(double));
   cudaMemcpy(d_Q_V,h_Q_V,Nrows*Nrows*sizeof(double),cudaMemcpyHostToDevice);cudaMemcpy(d_Q_W,h_Q_W,Nrows*Nrows*sizeof(double),cudaMemcpyHostToDevice);
+cout<<"Wtf 3-8"<<endl;;
   // CuDA QR execution 
   cusolverDnDormqr(solver_handle_m,CUBLAS_SIDE_LEFT,CUBLAS_OP_N,Nrows,Ncols,min(Nrows,Ncols),d_V,Nrows,d_TAU_V,d_Q_V,Nrows,work_V_m,work_size_m,devInfo_m);
   cusolverDnDormqr(solver_handle_m,CUBLAS_SIDE_LEFT,CUBLAS_OP_N,Nrows,Ncols,min(Nrows,Ncols),d_W,Nrows,d_TAU_W,d_Q_W,Nrows,work_W_m,work_size_m,devInfo_m);
@@ -596,6 +653,7 @@ while(error>itol and irka_iter<max_iter){
 
     }
   }
+cout<<"Wtf 3-9"<<endl;;
   // V and W have been orthogonalised
   // find Ared , Bred ...
   double *d_Q_V_mod;cudaMalloc(&d_Q_V_mod,Nrows*Ncols*sizeof(double));
@@ -603,10 +661,14 @@ while(error>itol and irka_iter<max_iter){
   double *d_A_temp; cudaMalloc(&d_A_temp,Nrows*Ncols*sizeof(double));
   double *d_A_red; cudaMalloc(&d_A_red,Ncols*Ncols*sizeof(double));
 
+
   cudaMemcpy(d_Q_V_mod,V,Nrows*Ncols*sizeof(double), cudaMemcpyHostToDevice);
   cudaMemcpy(d_Q_W_mod,W,Nrows*Ncols*sizeof(double), cudaMemcpyHostToDevice);
+cout<<"Wtf 3-10"<<endl;;
   gpu_blas_mmul(d_A_dense, d_Q_V_mod, d_A_temp, n, n, r);// q=Ap
   gpu_blas_mmul(d_Q_W_mod, d_A_temp, d_A_red, r, n, r);
+
+cout<<"Wtf 3-11"<<endl;;
   // d_A_red has the reduced Matrix ....
   double *d_B ;cudaMalloc(&d_B ,Nrows*sizeof(double));cudaMemcpy(d_B,B,Nrows*sizeof(double),cudaMemcpyHostToDevice);
   double *d_B_red ;cudaMalloc(&d_B_red ,Ncols*sizeof(double));
@@ -615,39 +677,45 @@ while(error>itol and irka_iter<max_iter){
    double *d_C_red ;cudaMalloc(&d_C_red,Ncols*sizeof(double ));
   cudaMemcpy(d_C,C,Nrows*sizeof(double),cudaMemcpyHostToDevice);
   gpu_blas_mmul(d_C,d_Q_V_mod,d_C_red,1,n,r);
-  double *B_red=(double *)malloc(r*sizeof(double));
-  double *C_red=(double *)malloc(r*sizeof(double));
-  double *A_red=(double *)malloc(r*r*sizeof(double));
   cudaMemcpy(A_red,d_A_red,r*r*sizeof(double),cudaMemcpyDeviceToHost);
   cudaMemcpy(B_red,d_B_red,r*sizeof(double),cudaMemcpyDeviceToHost);
   cudaMemcpy(C_red,d_C_red,r*sizeof(double),cudaMemcpyDeviceToHost);
  // we find the eiggen values of the Ared ... and change sigma ...
-
+cout<<"Wtf 3-12"<<endl;;   
   double *eigv= (double *)malloc(r*sizeof(double ));
   double *eigvec= (double *)malloc(r*r*sizeof(double ));
-   cusolverDnHandle_t cusolverH = NULL;
+cout<<"Wtf 3-12-0"<<endl;;
+   
    cusolverStatus_t cusolver_status = CUSOLVER_STATUS_SUCCESS;
-   int  lwork_eig = 0;
-   int lda=r;cusolverDnCreate(&cusolverH);
+cout<<"Wtf 3-12-01"<<endl;;   
+int  lwork_eig = 0;
+   int lda=r;
+cout<<"Wtf 3-12-001"<<endl;;
+cusolverDnHandle_t cusolverH ;cusolverDnCreate(&cusolverH);
+cout<<"Wtf 3-12-1"<<endl;; 
   int  *dev_info_eig;cudaMalloc ((void**)&dev_info_eig, sizeof(int));
   double *d_eigv;cudaMalloc ((void**)&d_eigv, r*sizeof(double));
   double *d_eigvec;cudaMalloc ((void**)&d_eigvec, r*r*sizeof(int));
+cout<<"Wtf 3-12-2"<<endl;; 
   cusolverEigMode_t jobz = CUSOLVER_EIG_MODE_VECTOR; // compute eigenvalues and eigenvectors.
    cublasFillMode_t uplo = CUBLAS_FILL_MODE_LOWER; 
+cout<<"Wtf 3-12-3"<<endl;; 
    cusolver_status = cusolverDnDsyevd_bufferSize( cusolverH, jobz, uplo, r, d_A_red, lda, d_eigv, &lwork_eig);
+cout<<"Wtf 3-12-4"<<endl;; 
    double *d_work_eig;  cudaMalloc((void**)&d_work_eig, sizeof(double)*lwork_eig);
    int *devInfo_eig = NULL;
    cusolverDnDsyevd( cusolverH, jobz, uplo, r, d_A_red, lda, d_eigv, d_work_eig, lwork_eig, devInfo_eig);
+cout<<"Wtf 3-12-5"<<endl;; 
    cudaMemcpy(eigv,d_eigv,r*sizeof(double),cudaMemcpyDeviceToHost);
    cudaMemcpy(eigvec,d_A_red,r*r*sizeof(double),cudaMemcpyDeviceToHost);
 
-
+ cout<<"Wtf 3-13"<<endl;;
 
   //
    double  norm_sigma=0;error=0;
    for(int j=0;j<r;j++){norm_sigma+=sig[j]*sig[j];sig[j]=eigv[j];error+=(sig[j]-sig_old[j])*(sig[j]-sig_old[j]);}
     error/=norm_sigma;
-
+ cout<<"Wtf 3-14"<<endl;;
  
   cudaFree(d_V);
   cudaFree(d_W);
@@ -680,6 +748,8 @@ while(error>itol and irka_iter<max_iter){
   cudaFree(d_eigvec);
   cudaFree(d_work_eig);
 
+ cout<<"Wtf 3-15"<<endl;;
+
   free(h_Q_V);
   free(h_Q_W);
   free(B_red);
@@ -687,13 +757,22 @@ while(error>itol and irka_iter<max_iter){
   free(C_red);
   free(eigv);
   free(eigvec);
+
+
+ cout<<"Wtf 3-16"<<endl;;
   cusolverDnDestroy(solver_handle_m);
   cublasDestroy(cublas_handle_m);
   
-  
+  cout<<"Wtf 3-17"<<endl;;
 
  }
 
+for(int i=0;i<r;i++){
+   for(int j=0;j<r;j++){
+    //cout<<A_red[i*r+j]<<" ";
+  }
+  cout<<endl;
+}
 
 //goes betwwn these two comments.
 cusparseDestroyMatDescr(descrEYE);
@@ -710,6 +789,7 @@ cudaFree(d_A_ColIndices);
 cudaFree(d_A_dense);
 cudaFree(d_nnzPerVectorA);
 cudaFree(d_nnzPerVectorEYE);
+cout<<"WTF 4"<<endl;
 
 
 }
